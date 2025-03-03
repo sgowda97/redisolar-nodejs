@@ -110,6 +110,7 @@ const findById = async (id) => {
  */
 const findAll = async () => {
   const client = redis.getClient();
+  const pipeline = client.batch();
 
   const siteIds = await client.zrangeAsync(keyGenerator.getSiteGeoKey(), 0, -1);
   const sites = [];
@@ -118,15 +119,13 @@ const findAll = async () => {
     const siteKey = keyGenerator.getSiteHashKey(siteId);
 
     /* eslint-disable no-await-in-loop */
-    const siteHash = await client.hgetallAsync(siteKey);
+    pipeline.hgetall(siteKey);
     /* eslint-enable */
-
-    if (siteHash) {
-      // Call remap to remap the flat key/value representation
-      // from the Redis hash into the site domain object format.
-      sites.push(remap(siteHash));
-    }
   }
+
+  const pipelineResults = await pipeline.execAsync();
+
+  for (let site of pipelineResults) sites.push(remap(site));
 
   return sites;
 };
@@ -180,7 +179,6 @@ const findByGeo = async (lat, lng, radius, radiusUnit) => {
 const findByGeoWithExcessCapacity = async (lat, lng, radius, radiusUnit) => {
   /* eslint-disable no-unreachable */
   // Challenge #5, remove the next line...
-  return [];
 
   const client = redis.getClient();
 
@@ -190,7 +188,7 @@ const findByGeoWithExcessCapacity = async (lat, lng, radius, radiusUnit) => {
   // Get sites within the radius and store them in a temporary sorted set.
   const sitesInRadiusSortedSetKey = keyGenerator.getTemporaryKey();
 
-  setOperationsPipeline.georadiusAsync(
+  setOperationsPipeline.georadius(
     keyGenerator.getSiteGeoKey(),
     lng,
     lat,
@@ -205,6 +203,15 @@ const findByGeoWithExcessCapacity = async (lat, lng, radius, radiusUnit) => {
   const sitesInRadiusCapacitySortedSetKey = keyGenerator.getTemporaryKey();
 
   // START Challenge #5
+  setOperationsPipeline.zinterstore(
+    sitesInRadiusCapacitySortedSetKey,
+    2,
+    sitesInRadiusSortedSetKey,
+    keyGenerator.getCapacityRankingKey(),
+    'WEIGHTS',
+    0,
+    1
+  )
   // END Challenge #5
 
   // Expire the temporary sorted sets after 30 seconds, so that we
