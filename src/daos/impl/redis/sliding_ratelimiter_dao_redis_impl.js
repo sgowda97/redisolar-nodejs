@@ -9,10 +9,18 @@ const timeUtils = require('../../../utils/time_utils');
 // Challenge 7
 const hitSlidingWindow = async (name, opts) => {
   const client = redis.getClient();
+  const key = keyGenerator.getSlidingLimiterKey(name, opts.interval, opts.maxHits);
+  const transaction = client.multi();
+  const currentTimeMs = timeUtils.getCurrentTimestampMillis();
 
-  // START Challenge #7
-  return -2;
-  // END Challenge #7
+  transaction.zadd(key, currentTimeMs, `${currentTimeMs}-${Math.random()}`);
+  transaction.zremrangebyscore(key, 0, currentTimeMs - opts.interval);
+  transaction.zcard(key);
+
+  const transactionRes = await transaction.execAsync();
+  const remaining = opts.maxHits - parseInt(transactionRes[2], 10);
+
+  return remaining < 0 ? -1 : remaining;
 };
 
 /* eslint-enable */
